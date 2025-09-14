@@ -18,19 +18,13 @@ android {
         versionName = flutter.versionName
     }
 
-    buildTypes {
-        release {
-            // Use your real keystore when you’re ready to sign
-            isMinifyEnabled = false
-            // If you have a proguard file, keep this; otherwise remove the line
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
-            // temp signing config for local builds; remove once you set release signing
-            signingConfig = signingConfigs.getByName("debug")
-        }
+buildTypes {
+    release {
+        isMinifyEnabled = false          // you already have this
+        isShrinkResources = false        // add this line (Kotlin DSL)
+        // …
     }
+}
 
     // Java/Kotlin toolchains — AGP 8 expects 17
     compileOptions {
