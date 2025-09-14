@@ -1,6 +1,12 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+
+Future<String> appVersion() async {
+  final info = await PackageInfo.fromPlatform();
+  return "${info.version}+${info.buildNumber}"; // e.g., 0.2.1+42
+}
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
