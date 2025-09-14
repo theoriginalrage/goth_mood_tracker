@@ -1,9 +1,12 @@
-A lightweight, goth-aesthetic daily mood tracker built with Flutter.
-- Offline first; data stays on device.
-- Streaks, history, and a shareable “mood card.”
-- AdMob banner/interstitial (tasteful, limited).
+# Goth Mood Tracker
 
-## Dev
-Flutter 3.x • Dart 3.x  
-Run: `flutter pub get && flutter run`
+A lightweight, goth-aesthetic daily mood tracker built with Flutter. Offline-first; local storage; streaks; shareable mood cards; tasteful ads.
+
+## Requirements
+- Flutter 3.35+
+- Dart 3.9+
+- Android SDK (Java 17)
+- ADB on PATH
+
+## Project Layout
 

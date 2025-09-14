@@ -1,52 +1,56 @@
 plugins {
     id("com.android.application")
     id("org.jetbrains.kotlin.android")
-    // This is required so the `flutter { ... }` block works:
     id("dev.flutter.flutter-gradle-plugin")
 }
 
+
 android {
-    namespace = "com.example.goth_mood_tracker" // <-- change to your package if different
+    namespace = "com.example.goth_mood_tracker" // adjust if you’ve changed package
     compileSdk = flutter.compileSdkVersion.toInt()
     ndkVersion = flutter.ndkVersion
 
     defaultConfig {
-        applicationId = "com.example.goth_mood_tracker" // <-- match your manifest/package
+        applicationId = "com.example.goth_mood_tracker" // match your package
         minSdk = flutter.minSdkVersion.toInt()
         targetSdk = flutter.targetSdkVersion.toInt()
         versionCode = flutter.versionCode.toInt()
         versionName = flutter.versionName
     }
 
-buildTypes {
-    release {
-        isMinifyEnabled = false          // you already have this
-        isShrinkResources = false        // add this line (Kotlin DSL)
-        // …
+    buildTypes {
+        release {
+            // Keep it simple while stabilizing
+            isMinifyEnabled = false
+            isShrinkResources = false
+            // Temp debug signing so release builds work locally
+            signingConfig = signingConfigs.getByName("debug")
+            // If you have a proguard file later, you can re-enable shrinking here
+        }
     }
-}
 
-    // Java/Kotlin toolchains — AGP 8 expects 17
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 
-    // ✅ This is the Kotlin DSL version of what you tried to add
+    // Prevent Lint Metaspace blowups during release builds
     lint {
         checkReleaseBuilds = false
         abortOnError = false
     }
 
-    // (optional) common packaging exclude to avoid META-INF clashes
     packaging {
         resources {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+}
+
+// Avoid ART baseline profile compilation on low-RAM dev box
+tasks.matching { it.name.contains("ArtProfile", ignoreCase = true) }.configureEach {
+    enabled = false
 }
 
 // This comes from the Flutter Gradle plugin above
