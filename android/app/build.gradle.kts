@@ -16,10 +16,11 @@ android {
     }
 
     lint {
-        // Don’t run heavy lint on release; prevents Metaspace OOMs
-        checkReleaseBuilds false
-        abortOnError false
+        // Kotlin DSL needs '='
+        checkReleaseBuilds = false
+        abortOnError = false
     }
+}
 
     kotlinOptions {
         jvmTarget = JavaVersion.VERSION_11.toString()
