@@ -1,223 +1,71 @@
+// lib/main.dart
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
+import 'package:google_mobile_ads/google_mobile_ads.dart';
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await MobileAds.instance.initialize();
+  runApp(const GothMoodApp());
+}
 
 Future<String> appVersion() async {
   final info = await PackageInfo.fromPlatform();
-  return "${info.version}+${info.buildNumber}"; // e.g., 0.2.1+42
+  return "${info.version}+${info.buildNumber}";
 }
 
-void main() {
-  WidgetsFlutterBinding.ensureInitialized();
-  runApp(const GothApp());
-}
-
-/// ---------------------- DATA MODELS ----------------------
-
-enum GothMood {
-  peterSteeleBassline,   // calm but gloomy
-  graveyardShift,        // exhausted
-  coffinNap,             // depressed but chill
-  ratsInTheWalls,        // angry/paranoid
-  eternalNight,          // content in the darkness
-  stormInTheVeins,       // anxious/static
-}
-
-extension GothMoodX on GothMood {
-  String get label {
-    switch (this) {
-      case GothMood.peterSteeleBassline:
-        return 'Peter Steele Bassline';
-      case GothMood.graveyardShift:
-        return 'Graveyard Shift';
-      case GothMood.coffinNap:
-        return 'Coffin Nap';
-      case GothMood.ratsInTheWalls:
-        return 'Rats in the Walls';
-      case GothMood.eternalNight:
-        return 'Eternal Night';
-      case GothMood.stormInTheVeins:
-        return 'Storm in the Veins';
-    }
-  }
-
-  String get emoji {
-    switch (this) {
-      case GothMood.peterSteeleBassline:
-        return '🎸';
-      case GothMood.graveyardShift:
-        return '🕯️';
-      case GothMood.coffinNap:
-        return '⚰️';
-      case GothMood.ratsInTheWalls:
-        return '🐀';
-      case GothMood.eternalNight:
-        return '🌑';
-      case GothMood.stormInTheVeins:
-        return '🌩️';
-    }
-  }
-}
-
-class MoodEntry {
-  final GothMood mood;
-  final DateTime at;
-  final String? note;
-
-  MoodEntry({required this.mood, required this.at, this.note});
-
-  Map<String, dynamic> toJson() => {
-        'mood': mood.name,
-        'at': at.toIso8601String(),
-        'note': note,
-      };
-
-  static MoodEntry fromJson(Map<String, dynamic> j) => MoodEntry(
-        mood: GothMood.values.firstWhere((m) => m.name == (j['mood'] as String)),
-        at: DateTime.tryParse(j['at'] as String? ?? '') ?? DateTime.now(),
-        note: j['note'] as String?,
-      );
-}
-
-/// ---------------------- STORAGE ----------------------
-
-class MoodStore extends ChangeNotifier {
-  static const _key = 'goth_mood_entries';
-  final List<MoodEntry> _entries = [];
-
-  List<MoodEntry> get entries =>
-      List.unmodifiable(_entries..sort((a, b) => b.at.compareTo(a.at)));
-
-  Future<void> load() async {
-    final prefs = await SharedPreferences.getInstance();
-    final raw = prefs.getStringList(_key) ?? [];
-    _entries
-      ..clear()
-      ..addAll(raw
-          .map((s) => jsonDecode(s))
-          .whereType<Map<String, dynamic>>()
-          .map(MoodEntry.fromJson));
-    notifyListeners();
-  }
-
-  Future<void> add(GothMood mood, {String? note}) async {
-    _entries.add(MoodEntry(mood: mood, at: DateTime.now(), note: note));
-    await _persist();
-    notifyListeners();
-  }
-
-  Future<void> clearAll() async {
-    _entries.clear();
-    await _persist();
-    notifyListeners();
-  }
-
-  Future<void> _persist() async {
-    final prefs = await SharedPreferences.getInstance();
-    final list = _entries.map((e) => jsonEncode(e.toJson())).toList();
-    await prefs.setStringList(_key, list);
-  }
-}
-
-/// ---------------------- APP ----------------------
-
-class GothApp extends StatefulWidget {
-  const GothApp({super.key});
-
-  @override
-  State<GothApp> createState() => _GothAppState();
-}
-
-class _GothAppState extends State<GothApp> {
-  final store = MoodStore();
-
-  @override
-  void initState() {
-    super.initState();
-    store.load();
-  }
+class GothMoodApp extends StatelessWidget {
+  const GothMoodApp({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: store,
-      builder: (_, __) {
-        return MaterialApp(
-          debugShowCheckedModeBanner: false,
-          title: 'Goth Mood',
-          theme: _darkTheme,
-          home: HomeScreen(store: store),
-        );
-      },
+    final base = ThemeData.dark(useMaterial3: true);
+    return MaterialApp(
+      title: 'Goth Mood Tracker',
+      theme: base.copyWith(
+        colorScheme: base.colorScheme.copyWith(
+          primary: const Color(0xFF6E2D7B), // purple accent
+          secondary: const Color(0xFF6E2D7B),
+        ),
+        scaffoldBackgroundColor: const Color(0xFF0F0F12),
+        textTheme: base.textTheme.apply(
+          bodyColor: Colors.white,
+          displayColor: Colors.white,
+        ),
+      ),
+      home: const _RootNav(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
 
-/// ---------------------- THEME ----------------------
-/// Avoid `const` inside here so non-const constructors (e.g. BorderRadius.circular)
-/// don’t trigger “constant expression expected” errors on older SDKs.
-final ThemeData _darkTheme = ThemeData(
-  brightness: Brightness.dark,
-  scaffoldBackgroundColor: const Color(0xFF0E0D12), // near-black
-  colorScheme: const ColorScheme.dark(
-    primary: Color(0xFF8A1638), // wine/blood
-    secondary: Color(0xFF5C1E5E), // deep purple
-    surface: Color(0xFF14131A),
-  ),
-  textTheme: TextTheme(
-    headlineMedium: const TextStyle(fontWeight: FontWeight.w700),
-    bodyMedium: const TextStyle(color: Color(0xFFE6E6E6)),
-  ),
-  cardTheme: CardThemeData(
-    color: const Color(0xFF16141C),
-    elevation: 4,
-    shape: RoundedRectangleBorder(
-      borderRadius: BorderRadius.circular(16),
-    ),
-  ),
-  inputDecorationTheme: InputDecorationTheme(
-    filled: true,
-    fillColor: const Color(0xFF1B1922),
-    border: OutlineInputBorder(
-      borderRadius: BorderRadius.circular(12),
-      borderSide: const BorderSide(color: Color(0xFF2A2731)),
-    ),
-  ),
-);
-
-/// ---------------------- SCREENS ----------------------
-
-class HomeScreen extends StatefulWidget {
-  final MoodStore store;
-  const HomeScreen({super.key, required this.store});
+class _RootNav extends StatefulWidget {
+  const _RootNav({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  State<_RootNav> createState() => _RootNavState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  int _tab = 0;
+class _RootNavState extends State<_RootNav> {
+  int _idx = 0;
 
   @override
   Widget build(BuildContext context) {
-    final tabs = [
-      _LogMoodTab(store: widget.store),
-      _HistoryTab(store: widget.store),
-      _SettingsTab(store: widget.store),
+    final pages = <Widget>[
+      const LogScreen(),
+      const HistoryScreen(),
+      const SettingsScreen(),
     ];
 
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('Goth Mood Tracker'),
-        centerTitle: false,
-      ),
-      body: tabs[_tab],
+      body: SafeArea(child: pages[_idx]),
       bottomNavigationBar: NavigationBar(
-        selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        selectedIndex: _idx,
+        onDestinationSelected: (i) => setState(() => _idx = i),
         destinations: const [
-          NavigationDestination(icon: Icon(Icons.bloodtype), label: 'Log'),
+          NavigationDestination(icon: Icon(Icons.bloodtype_outlined), selectedIcon: Icon(Icons.bloodtype), label: 'Log'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
           NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
         ],
@@ -226,207 +74,286 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-class _LogMoodTab extends StatefulWidget {
-  final MoodStore store;
-  const _LogMoodTab({required this.store});
+// ---------------- Screens (simple placeholders to compile) ---------------- //
+
+class LogScreen extends StatefulWidget {
+  const LogScreen({super.key});
 
   @override
-  State<_LogMoodTab> createState() => _LogMoodTabState();
+  State<LogScreen> createState() => _LogScreenState();
 }
 
-class _LogMoodTabState extends State<_LogMoodTab> {
-  final noteCtrl = TextEditingController();
+class _LogScreenState extends State<LogScreen> {
+  final _note = TextEditingController();
+  final _moods = const [
+    ('🎸', 'Peter Steele Bassline'),
+    ('🕯️', 'Graveyard Shift'),
+    ('⚰️', 'Coffin Nap'),
+    ('🐀', 'Rats in the Walls'),
+    ('🌑', 'Eternal Night'),
+    ('⛈️', 'Storm in the Veins'),
+  ];
 
-  @override
-  void dispose() {
-    noteCtrl.dispose();
-    super.dispose();
+  Future<void> _save(String mood) async {
+    final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now().toUtc().toIso8601String();
+    final list = prefs.getStringList('entries') ?? <String>[];
+    final entry = jsonEncode({'ts': now, 'mood': mood, 'note': _note.text.trim()});
+    list.insert(0, entry);
+    await prefs.setStringList('entries', list);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Your darkness has been noted: $mood'),
+          action: SnackBarAction(label: 'Dismiss', onPressed: () {}),
+        ),
+      );
+      _note.clear();
+    }
+    // TODO: call your interstitial gating (every 3 saves) here if wired.
   }
 
   @override
   Widget build(BuildContext context) {
-    final moods = GothMood.values;
-
+    final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.all(16),
-      child: ListView(
+      padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const SizedBox(height: 8),
-          Text(
-            'How bleak are we today?',
-            style: Theme.of(context).textTheme.headlineMedium,
-          ),
+          Text('Goth Mood Tracker', style: theme.textTheme.headlineSmall),
+          const SizedBox(height: 12),
+          Text('How bleak are we today?', style: theme.textTheme.headlineMedium?.copyWith(fontWeight: FontWeight.w700)),
           const SizedBox(height: 16),
           Wrap(
             spacing: 12,
             runSpacing: 12,
-            children: [
-              for (final m in moods)
-                _MoodButton(
-                  mood: m,
-                  onTap: () async {
-                    final note = noteCtrl.text.trim();
-                    await widget.store.add(m, note: note.isEmpty ? null : note);
-                    if (mounted) {
-                      _snarkToast(context, m);
-                      noteCtrl.clear();
-                    }
-                  },
+            children: _moods.map((m) {
+              return SizedBox(
+                width: (MediaQuery.of(context).size.width - 16 * 2 - 12) / 2,
+                child: ElevatedButton(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: const Color(0xFF1A1A1F),
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(vertical: 18),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+                  ),
+                  onPressed: () => _save(m.$2),
+                  child: Column(
+                    children: [
+                      Text(m.$1, style: const TextStyle(fontSize: 22)),
+                      const SizedBox(height: 6),
+                      Text(m.$2, textAlign: TextAlign.center),
+                    ],
+                  ),
                 ),
-            ],
+              );
+            }).toList(),
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 18),
           TextField(
-            controller: noteCtrl,
-            maxLines: 2,
-            textInputAction: TextInputAction.done,
+            controller: _note,
+            maxLength: 140,
             decoration: const InputDecoration(
               hintText: 'Optional note (e.g., “rain sounded like applause for my mistakes”)',
+              border: OutlineInputBorder(borderRadius: BorderRadius.all(Radius.circular(16))),
             ),
           ),
         ],
       ),
     );
   }
-
-  void _snarkToast(BuildContext context, GothMood mood) {
-    final lines = [
-      'Another day, another beautiful abyss.',
-      'Misery loves company. You brought snacks.',
-      'Congrats — you logged feelings *again*. Punk.',
-      'The void is proud of you. In its own way.',
-      'Vitamin D called. You sent it to voicemail.',
-    ];
-    final msg =
-        '${mood.emoji} ${mood.label} — ${lines[DateTime.now().second % lines.length]}';
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
-    );
-  }
 }
 
-class _HistoryTab extends StatelessWidget {
-  final MoodStore store;
-  const _HistoryTab({required this.store});
+class HistoryScreen extends StatefulWidget {
+  const HistoryScreen({super.key});
+
+  @override
+  State<HistoryScreen> createState() => _HistoryScreenState();
+}
+
+class _HistoryScreenState extends State<HistoryScreen> {
+  List<Map<String, dynamic>> _entries = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('entries') ?? <String>[];
+    setState(() {
+      _entries = list.map((s) => jsonDecode(s) as Map<String, dynamic>).toList();
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
-    final items = store.entries;
-
-    if (items.isEmpty) {
-      return const Center(
-        child: Text('No entries yet. Go feel something bleak.'),
-      );
-    }
-
-    return ListView.separated(
-      padding: const EdgeInsets.all(12),
-      itemCount: items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
-      itemBuilder: (_, i) {
-        final e = items[i];
-        return Card(
-          child: ListTile(
-            leading: Text(e.mood.emoji, style: const TextStyle(fontSize: 24)),
-            title: Text(e.mood.label),
-            subtitle: Text(
-              _niceDate(e.at) + (e.note == null ? '' : '\n${e.note}'),
-              maxLines: 4,
-            ),
+    final theme = Theme.of(context);
+    return Column(
+      children: [
+        // Streak chips (basic, counts unique days)
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+          child: Row(
+            children: [
+              _Chip(text: '🔥 Current: ${_currentStreak(_uniqueDays())}'),
+              const SizedBox(width: 8),
+              _Chip(text: '🏆 Longest: ${_longestStreak(_uniqueDays())}'),
+            ],
           ),
-        );
-      },
-    );
-  }
-
-  String _niceDate(DateTime dt) {
-    final d = dt.toLocal();
-    String two(int n) => n.toString().padLeft(2, '0');
-    return '${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
-  }
-}
-
-class _SettingsTab extends StatelessWidget {
-  final MoodStore store;
-  const _SettingsTab({required this.store});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Text('Settings', style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
-          const SizedBox(height: 12),
-          const Text('Theme is locked to “eternal darkness.” Obviously.'),
-          const SizedBox(height: 24),
-          FilledButton.tonal(
-            onPressed: () async {
-              final ok = await showDialog<bool>(
-                context: context,
-                builder: (ctx) => AlertDialog(
-                  title: const Text('Delete All Entries?'),
-                  content: const Text('The void will reclaim your history. This cannot be undone.'),
-                  actions: [
-                    TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('Cancel')),
-                    FilledButton(onPressed: () => Navigator.pop(ctx, true), child: const Text('Erase')),
+        ),
+        Expanded(
+          child: ListView.separated(
+            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
+            itemCount: _entries.length,
+            separatorBuilder: (_, __) => const SizedBox(height: 12),
+            itemBuilder: (context, i) {
+              final e = _entries[i];
+              final ts = DateTime.tryParse(e['ts'] as String? ?? '')?.toLocal();
+              final note = (e['note'] as String?)?.trim();
+              return Container(
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1A1A1F),
+                  borderRadius: BorderRadius.circular(18),
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(e['mood'] ?? '', style: theme.textTheme.titleMedium),
+                    if (ts != null)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4),
+                        child: Text(
+                          '${ts.year.toString().padLeft(4, '0')}-${ts.month.toString().padLeft(2, '0')}-${ts.day.toString().padLeft(2, '0')} '
+                          '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}',
+                          style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+                        ),
+                      ),
+                    if (note != null && note.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(note, style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70)),
+                      ),
                   ],
                 ),
               );
-              if (ok == true) {
-                await store.clearAll();
-                if (context.mounted) {
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Emptied into the abyss.')),
-                  );
-                }
-              }
             },
-            child: const Text('Erase All Data'),
           ),
-          const SizedBox(height: 12),
-          const Text('v0.1.0 — “First Coffin”'),
-        ],
+        ),
+        // If you already built a banner widget, replace this SizedBox with it.
+        const SizedBox(height: 0),
+      ],
+    );
+  }
+
+  Set<DateTime> _uniqueDays() {
+    return _entries.map((e) {
+      final ts = DateTime.tryParse(e['ts'] as String? ?? '')?.toUtc();
+      if (ts == null) return null;
+      return DateTime.utc(ts.year, ts.month, ts.day);
+    }).whereType<DateTime>().toSet();
+  }
+
+  int _currentStreak(Set<DateTime> days) {
+    if (days.isEmpty) return 0;
+    var d = DateTime.now().toUtc();
+    d = DateTime.utc(d.year, d.month, d.day);
+    var s = 0;
+    while (days.contains(d)) { s++; d = d.subtract(const Duration(days: 1)); }
+    return s;
+  }
+
+  int _longestStreak(Set<DateTime> days) {
+    if (days.isEmpty) return 0;
+    var best = 0;
+    for (final start in days) {
+      if (days.contains(start.subtract(const Duration(days: 1)))) continue;
+      var len = 0; var d = start;
+      while (days.contains(d)) { len++; d = d.add(const Duration(days: 1)); }
+      if (len > best) best = len;
+    }
+    return best;
+  }
+}
+
+class _Chip extends StatelessWidget {
+  final String text;
+  const _Chip({required this.text});
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF2A2330),
+        borderRadius: BorderRadius.circular(999),
       ),
+      child: Text(text),
     );
   }
 }
 
-/// ---------------------- UI BITS ----------------------
+class SettingsScreen extends StatefulWidget {
+  const SettingsScreen({super.key});
 
-class _MoodButton extends StatelessWidget {
-  final GothMood mood;
-  final VoidCallback onTap;
-  const _MoodButton({required this.mood, required this.onTap});
+  @override
+  State<SettingsScreen> createState() => _SettingsScreenState();
+}
+
+class _SettingsScreenState extends State<SettingsScreen> {
+  bool _busy = false;
+
+  Future<void> _eraseAll() async {
+    setState(() => _busy = true);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove('entries');
+    setState(() => _busy = false);
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('All data erased. The void is appeased.')));
+    }
+  }
+
+  Future<void> _exportJson() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = prefs.getStringList('entries') ?? <String>[];
+    final str = const JsonEncoder.withIndent('  ').convert(list.map((e) => jsonDecode(e)).toList());
+    // In a real app, write to Downloads + share. Placeholder:
+    debugPrint('EXPORT JSON:\n$str');
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Exported to log (wire Share later).')));
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Ink(
-        width: 170,
-        height: 80,
-        decoration: BoxDecoration(
-          color: const Color(0xFF1A1821),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: const Color(0xFF2A2731)),
-        ),
-        child: Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text(mood.emoji, style: const TextStyle(fontSize: 22)),
-              const SizedBox(height: 4),
-              Text(
-                mood.label,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 12),
-              ),
-            ],
+    final theme = Theme.of(context);
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('Goth Mood Tracker', style: theme.textTheme.headlineSmall),
+          const SizedBox(height: 16),
+          Text('Theme is locked to “eternal darkness.” Obviously.', style: theme.textTheme.bodyLarge),
+          const SizedBox(height: 16),
+          FilledButton(
+            onPressed: _busy ? null : _eraseAll,
+            child: _busy ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('Erase All Data'),
           ),
-        ),
+          const SizedBox(height: 8),
+          OutlinedButton(onPressed: _exportJson, child: const Text('Export JSON')),
+          const Spacer(),
+          FutureBuilder<String>(
+            future: appVersion(),
+            builder: (context, snap) {
+              final v = snap.data ?? '…';
+              return Text('v$v — “First Coffin”', style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70));
+            },
+          ),
+        ],
       ),
     );
   }
