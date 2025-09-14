@@ -3,6 +3,11 @@
         android:label="Goth Mood Tracker"
         android:name="${applicationName}"
         android:icon="@mipmap/ic_launcher">
+
+        <meta-data
+            android:name="com.google.android.gms.ads.APPLICATION_ID"
+            android:value="ca-app-pub-0932354922534500~4508651569" />
+
         <activity
             android:name=".MainActivity"
             android:exported="true"
