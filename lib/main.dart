@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:package_info_plus/package_info_plus.dart';
 import 'package:google_mobile_ads/google_mobile_ads.dart';
+import 'share_service.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -214,32 +215,58 @@ class _HistoryScreenState extends State<HistoryScreen> {
               final e = _entries[i];
               final ts = DateTime.tryParse(e['ts'] as String? ?? '')?.toLocal();
               final note = (e['note'] as String?)?.trim();
-              return Container(
-                decoration: BoxDecoration(
-                  color: const Color(0xFF1A1A1F),
-                  borderRadius: BorderRadius.circular(18),
-                ),
-                padding: const EdgeInsets.all(16),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(e['mood'] ?? '', style: theme.textTheme.titleMedium),
-                    if (ts != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 4),
-                        child: Text(
-                          '${ts.year.toString().padLeft(4, '0')}-${ts.month.toString().padLeft(2, '0')}-${ts.day.toString().padLeft(2, '0')} '
-                          '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}',
-                          style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+              return Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Shareable(
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1A1A1F),
+                        borderRadius: BorderRadius.circular(18),
+                      ),
+                      padding: const EdgeInsets.all(16),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(e['mood'] ?? '', style: theme.textTheme.titleMedium),
+                          if (ts != null)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 4),
+                              child: Text(
+                                '${ts.year.toString().padLeft(4, '0')}-${ts.month.toString().padLeft(2, '0')}-${ts.day.toString().padLeft(2, '0')} '
+                                '${ts.hour.toString().padLeft(2, '0')}:${ts.minute.toString().padLeft(2, '0')}',
+                                style: theme.textTheme.bodySmall?.copyWith(color: Colors.white70),
+                              ),
+                            ),
+                          if (note != null && note.isNotEmpty)
+                            Padding(
+                              padding: const EdgeInsets.only(top: 8),
+                              child: Text(note, style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70)),
+                            ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(
+                        tooltip: 'Share',
+                        icon: const Icon(Icons.ios_share),
+                        onPressed: () => shareGeneric(text: 'My Goth Mood streak 👇'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(
+                        tooltip: 'Share to Instagram Stories',
+                        icon: const Icon(Icons.camera_alt_outlined),
+                        onPressed: () => shareToInstagramStories(
+                          attributionUrl: 'https://pixelpanic.shop',
                         ),
                       ),
-                    if (note != null && note.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(note, style: theme.textTheme.bodyMedium?.copyWith(color: Colors.white70)),
-                      ),
-                  ],
-                ),
+                    ],
+                  ),
+                ],
               );
             },
           ),
