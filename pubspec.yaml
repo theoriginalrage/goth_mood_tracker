@@ -11,6 +11,10 @@ dependencies:
     sdk: flutter
   package_info_plus: ^9.0.0
   shared_preferences: ^2.2.3
+  share_plus: ^10.0.2
+  screenshot: ^2.5.0
+  path_provider: ^2.1.4
+  instagram_share_plus: ^1.0.0
 
 dev_dependencies:
   flutter_test:
