@@ -2,83 +2,73 @@
 set -euo pipefail
 
 # Usage:
-#   ./scripts/release.sh patch apk
-#   ./scripts/release.sh minor aab
-#   ./scripts/release.sh patch both
-#   ./scripts/release.sh patch        # defaults to 'both'
+#   scripts/release.sh patch
+#   scripts/release.sh minor
+#   scripts/release.sh major
+# Env:
+#   DRY_RUN=1   # show what would happen, don’t change anything
 
-BUMP="${1:-patch}"
-TARGET="${2:-both}"
+BUMP="${1:-patch}"   # default to patch
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 
-ROOT="$(git rev-parse --show-toplevel)"
-cd "$ROOT"
+# --- helpers ---
+say() { printf "🔧 %s\n" "$*"; }
+run() { if [[ "${DRY_RUN:-}" = "1" ]]; then printf "DRY: %s\n" "$*"; else eval "$@"; fi; }
 
-PUBSPEC="pubspec.yaml"
-
-# --- sanity checks ---
-if ! git diff --quiet; then
-  echo "✋ Commit or stash your changes before releasing."
-  exit 1
+# --- prechecks ---
+if [[ -n "$(git status --porcelain)" ]]; then
+  echo "❌ Working tree not clean. Commit or stash changes first."; exit 1
 fi
 
-if [[ ! -f "$PUBSPEC" ]]; then
-  echo "pubspec.yaml not found. Run from project root."
-  exit 1
+if ! git rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  echo "❌ Not a git repo."; exit 1
 fi
 
-# --- read current version (X.Y.Z[+N]) ---
-CURR_LINE=$(grep -E '^version:\s*[0-9]+\.[0-9]+\.[0-9]+' "$PUBSPEC" | head -n1)
-CURR_VER=$(echo "$CURR_LINE" | awk '{print $2}')
-BASE=${CURR_VER%%+*}
-MAJOR=$(echo "$BASE" | awk -F. '{print $1}')
-MINOR=$(echo "$BASE" | awk -F. '{print $2}')
-PATCH=$(echo "$BASE" | awk -F. '{print $3}')
+if [[ "$BRANCH" != "main" && "$BRANCH" != "master" ]]; then
+  say "Not on main/master (on '$BRANCH'). Continuing anyway…"
+fi
+
+if ! command -v awk >/dev/null || ! command -v sed >/dev/null; then
+  echo "❌ Need 'awk' and 'sed' available."; exit 1
+fi
+
+# --- read version from pubspec.yaml ---
+CURR=$(awk -F ': ' '/^version:/ {print $2}' pubspec.yaml | cut -d'+' -f1)
+if [[ -z "${CURR}" ]]; then
+  echo "❌ Could not read version from pubspec.yaml"; exit 1
+fi
+
+MAJ=$(echo "$CURR" | cut -d. -f1)
+MIN=$(echo "$CURR" | cut -d. -f2)
+PAT=$(echo "$CURR" | cut -d. -f3)
 
 case "$BUMP" in
-  major) MAJOR=$((MAJOR+1)); MINOR=0; PATCH=0 ;;
-  minor) MINOR=$((MINOR+1)); PATCH=0 ;;
-  patch) PATCH=$((PATCH+1)) ;;
-  *) echo "Unknown bump: $BUMP (use major|minor|patch)"; exit 1 ;;
+  major) MAJ=$((MAJ+1)); MIN=0; PAT=0 ;;
+  minor) MIN=$((MIN+1)); PAT=0 ;;
+  patch) PAT=$((PAT+1)) ;;
+  *) echo "❌ Unknown bump '$BUMP' (use patch|minor|major)"; exit 1 ;;
 esac
 
-NEW_BASE="${MAJOR}.${MINOR}.${PATCH}"
+NEW="$MAJ.$MIN.$PAT"
 
-# --- build number from git commits ---
-BUILD_NUM=$(git rev-list --count HEAD)
+# --- bump build number +1 (the +N part) ---
+BUILD=$(awk -F '[+: ]' '/^version:/ {print $3}' pubspec.yaml || true)
+[[ -z "${BUILD:-}" ]] && BUILD=0
+BUILD=$((BUILD+1))
 
-# --- write pubspec version ---
-sed -i "s/^version: .*/version: ${NEW_BASE}+${BUILD_NUM}/" "$PUBSPEC"
+say "Bumping version: $CURR -> $NEW (+$BUILD)"
 
-# --- commit & tag ---
-git add "$PUBSPEC"
-git commit -m "chore: release ${NEW_BASE}+${BUILD_NUM}"
-git tag -a "v${NEW_BASE}" -m "Release ${NEW_BASE}"
+# --- update pubspec.yaml ---
+run sed -i "s/^version:.*/version: $NEW+$BUILD/" pubspec.yaml
 
-# --- refresh deps & build ---
-flutter clean
-flutter pub get
+# --- commit + tag ---
+run git add pubspec.yaml
+run git commit -m "chore(release): $NEW+$BUILD"
+run git tag -a "v$NEW" -m "Release $NEW"
 
-case "$TARGET" in
-  apk)
-    flutter build apk --release
-    echo "✅ APK: build/app/outputs/flutter-apk/app-release.apk"
-    ;;
-  aab)
-    flutter build appbundle --release
-    echo "✅ AAB: build/app/outputs/bundle/release/app-release.aab"
-    ;;
-  both)
-    flutter build apk --release
-    flutter build appbundle --release
-    echo "✅ APK: build/app/outputs/flutter-apk/app-release.apk"
-    echo "✅ AAB: build/app/outputs/bundle/release/app-release.aab"
-    ;;
-  *)
-    echo "Unknown target: $TARGET (use apk|aab|both)"
-    exit 1
-    ;;
-esac
+# --- push ---
+run git push origin "$BRANCH"
+run git push origin "v$NEW"
 
-echo
-echo "🎯 Release ${NEW_BASE}+${BUILD_NUM} built and tagged as v${NEW_BASE}"
-echo "👉 Push it: git push && git push --tags"
+say "✅ Released v$NEW (pubspec $NEW+$BUILD)"
+
