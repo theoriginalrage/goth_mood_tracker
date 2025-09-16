@@ -119,6 +119,72 @@ class MoodStore extends ChangeNotifier {
     final list = _entries.map((e) => jsonEncode(e.toJson())).toList();
     await prefs.setStringList(_key, list);
   }
+
+  /// Returns (currentStreak, bestStreak)
+  (int, int) computeStreaks() {
+    if (_entries.isEmpty) return (0, 0);
+
+    // Unique local dates, newest first
+    final dates = _entries
+        .map((e) => _asYmd(e.at.toLocal()))
+        .toSet()
+        .toList()
+      ..sort((a, b) => b.compareTo(a)); // desc
+
+    // Build a sorted list of DateTime (midnight local) for iteration
+    final days = dates.map((s) => DateTime.parse(s)).toList();
+
+    int best = 0;
+    int curr = 0;
+
+    // current streak: only continuous from the latest day backwards
+    {
+      curr = 1;
+      for (int i = 1; i < days.length; i++) {
+        final prev = days[i - 1];
+        final d = days[i];
+        if (_isPrevDay(prev, d)) {
+          curr++;
+        } else {
+          break;
+        }
+      }
+    }
+
+    // best streak: scan all runs
+    {
+      int run = 1;
+      for (int i = 1; i < days.length; i++) {
+        final prev = days[i - 1];
+        final d = days[i];
+        if (_isPrevDay(prev, d)) {
+          run++;
+        } else {
+          if (run > best) best = run;
+          run = 1;
+        }
+      }
+      if (run > best) best = run;
+    }
+
+    return (curr, best);
+  }
+
+  // Normalize to yyyy-mm-dd (local)
+  String _asYmd(DateTime dt) {
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${dt.year}-${two(dt.month)}-${two(dt.day)}';
+  }
+
+  // true if d is exactly one day before prev
+  bool _isPrevDay(DateTime prev, DateTime d) {
+    final prevMinusOne = DateTime(prev.year, prev.month, prev.day)
+        .subtract(const Duration(days: 1));
+    final dd = DateTime(d.year, d.month, d.day);
+    return dd.year == prevMinusOne.year &&
+        dd.month == prevMinusOne.month &&
+        dd.day == prevMinusOne.day;
+  }
 }
 
 /// ---------------------- APP ----------------------
@@ -370,26 +436,50 @@ class _HistoryTab extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final items = store.entries;
+    final (curr, best) = store.computeStreaks();
 
-    if (items.isEmpty) {
-      return const Center(
-        child: Text('No entries yet. Go feel something bleak.'),
-      );
-    }
-
-    return ListView.separated(
+    return ListView.builder(
       padding: const EdgeInsets.all(12),
-      itemCount: items.length,
-      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemCount: (items.isEmpty ? 1 : items.length + 1),
       itemBuilder: (_, i) {
-        final e = items[i];
-        return Card(
-          child: ListTile(
-            leading: Text(e.mood.emoji, style: const TextStyle(fontSize: 24)),
-            title: Text(e.mood.label),
-            subtitle: Text(
-              _niceDate(e.at) + (e.note == null ? '' : '\n${e.note}'),
-              maxLines: 4,
+        // First item: streak header card
+        if (i == 0) {
+          return Card(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+              child: Row(
+                children: [
+                  const Icon(Icons.whatshot), // subtle, matches theme
+                  const SizedBox(width: 10),
+                  Text(
+                    'Streak: $curr day${curr == 1 ? '' : 's'} • Best: $best',
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        // No entries? show the empty message after the streak card
+        if (items.isEmpty) {
+          return const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: Center(child: Text('No entries yet. Go feel something bleak.')),
+          );
+        }
+
+        final e = items[i - 1];
+        return Padding(
+          padding: const EdgeInsets.only(top: 8),
+          child: Card(
+            child: ListTile(
+              leading: Text(e.mood.emoji, style: const TextStyle(fontSize: 24)),
+              title: Text(e.mood.label),
+              subtitle: Text(
+                _niceDate(e.at) + (e.note == null ? '' : '\n${e.note}'),
+                maxLines: 4,
+              ),
             ),
           ),
         );
