@@ -1,103 +1,495 @@
+import 'dart:convert';
+import 'dart:typed_data';
+import 'dart:ui' as ui;
+
 import 'package:flutter/material.dart';
-import 'share_service.dart'; // make sure this exists
+import 'package:flutter/rendering.dart'; // for RenderRepaintBoundary
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:share_plus/share_plus.dart';
 
 void main() {
-  runApp(const MyApp());
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const GothApp());
 }
 
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
+/// ---------------------- DATA MODELS ----------------------
+
+enum GothMood {
+  peterSteeleBassline,   // calm but gloomy
+  graveyardShift,        // exhausted
+  coffinNap,             // depressed but chill
+  ratsInTheWalls,        // angry/paranoid
+  eternalNight,          // content in the darkness
+  stormInTheVeins,       // anxious/static
+}
+
+extension GothMoodX on GothMood {
+  String get label {
+    switch (this) {
+      case GothMood.peterSteeleBassline:
+        return 'Peter Steele Bassline';
+      case GothMood.graveyardShift:
+        return 'Graveyard Shift';
+      case GothMood.coffinNap:
+        return 'Coffin Nap';
+      case GothMood.ratsInTheWalls:
+        return 'Rats in the Walls';
+      case GothMood.eternalNight:
+        return 'Eternal Night';
+      case GothMood.stormInTheVeins:
+        return 'Storm in the Veins';
+    }
+  }
+
+  String get emoji {
+    switch (this) {
+      case GothMood.peterSteeleBassline:
+        return '🎸';
+      case GothMood.graveyardShift:
+        return '🕯️';
+      case GothMood.coffinNap:
+        return '⚰️';
+      case GothMood.ratsInTheWalls:
+        return '🐀';
+      case GothMood.eternalNight:
+        return '🌑';
+      case GothMood.stormInTheVeins:
+        return '🌩️';
+    }
+  }
+}
+
+class MoodEntry {
+  final GothMood mood;
+  final DateTime at;
+  final String? note;
+
+  MoodEntry({required this.mood, required this.at, this.note});
+
+  Map<String, dynamic> toJson() => {
+        'mood': mood.name,
+        'at': at.toIso8601String(),
+        'note': note,
+      };
+
+  static MoodEntry fromJson(Map<String, dynamic> j) => MoodEntry(
+        mood: GothMood.values.firstWhere((m) => m.name == (j['mood'] as String)),
+        at: DateTime.tryParse(j['at'] as String? ?? '') ?? DateTime.now(),
+        note: j['note'] as String?,
+      );
+}
+
+/// ---------------------- STORAGE ----------------------
+
+class MoodStore extends ChangeNotifier {
+  static const _key = 'goth_mood_entries';
+  final List<MoodEntry> _entries = [];
+
+  List<MoodEntry> get entries =>
+      List.unmodifiable(_entries..sort((a, b) => b.at.compareTo(a.at)));
+
+  MoodEntry? get latest => entries.isEmpty ? null : entries.first;
+
+  Future<void> load() async {
+    final prefs = await SharedPreferences.getInstance();
+    final raw = prefs.getStringList(_key) ?? [];
+    _entries
+      ..clear()
+      ..addAll(raw
+          .map((s) => jsonDecode(s))
+          .whereType<Map<String, dynamic>>()
+          .map(MoodEntry.fromJson));
+    notifyListeners();
+  }
+
+  Future<void> add(GothMood mood, {String? note}) async {
+    _entries.add(MoodEntry(mood: mood, at: DateTime.now(), note: note));
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> clearAll() async {
+    _entries.clear();
+    await _persist();
+    notifyListeners();
+  }
+
+  Future<void> _persist() async {
+    final prefs = await SharedPreferences.getInstance();
+    final list = _entries.map((e) => jsonEncode(e.toJson())).toList();
+    await prefs.setStringList(_key, list);
+  }
+}
+
+/// ---------------------- APP ----------------------
+
+class GothApp extends StatefulWidget {
+  const GothApp({super.key});
+
+  @override
+  State<GothApp> createState() => _GothAppState();
+}
+
+class _GothAppState extends State<GothApp> {
+  final store = MoodStore();
+
+  // key to capture the whole screen content
+  final GlobalKey repaintKey = GlobalKey();
+
+  @override
+  void initState() {
+    super.initState();
+    store.load();
+  }
+
+  Future<void> _shareScreenshot() async {
+    try {
+      final ctx = repaintKey.currentContext;
+      if (ctx == null) return;
+      final boundary =
+          ctx.findRenderObject() as RenderRepaintBoundary?;
+      if (boundary == null) return;
+
+      final ui.Image image = await boundary.toImage(pixelRatio: 3.0);
+      final ByteData? byteData =
+          await image.toByteData(format: ui.ImageByteFormat.png);
+      if (byteData == null) return;
+      final Uint8List pngBytes = byteData.buffer.asUint8List();
+
+      final latest = store.latest;
+      final caption = latest == null
+          ? 'Goth Mood Tracker'
+          : 'Goth Mood: ${latest.mood.emoji} ${latest.mood.label}'
+            '${latest.note == null ? '' : '\nNote: ${latest.note}'}';
+
+      await Share.shareXFiles(
+        [
+          XFile.fromData(
+            pngBytes,
+            name: 'goth_mood_${DateTime.now().millisecondsSinceEpoch}.png',
+            mimeType: 'image/png',
+          ),
+        ],
+        text: caption,
+        subject: 'Goth Mood',
+      );
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Sharing failed: $e')),
+        );
+      }
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
-      title: 'Goth Mood Tracker',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
-      home: const MoodPage(),
+    return AnimatedBuilder(
+      animation: store,
+      builder: (_, __) {
+        return MaterialApp(
+          debugShowCheckedModeBanner: false,
+          title: 'Goth Mood',
+          theme: _darkTheme,
+          home: RepaintBoundary( // everything inside becomes the screenshot
+            key: repaintKey,
+            child: HomeScreen(
+              store: store,
+              onShare: _shareScreenshot,
+            ),
+          ),
+        );
+      },
     );
   }
 }
 
-class MoodPage extends StatefulWidget {
-  const MoodPage({super.key});
+/// ---------------------- THEME ----------------------
+
+final ThemeData _darkTheme = ThemeData(
+  brightness: Brightness.dark,
+  scaffoldBackgroundColor: const Color(0xFF0E0D12), // near-black
+  colorScheme: const ColorScheme.dark(
+    primary: Color(0xFF8A1638), // wine/blood
+    secondary: Color(0xFF5C1E5E), // deep purple
+    surface: Color(0xFF14131A),
+  ),
+  textTheme: TextTheme(
+    headlineMedium: const TextStyle(fontWeight: FontWeight.w700),
+    bodyMedium: const TextStyle(color: Color(0xFFE6E6E6)),
+  ),
+  cardTheme: CardThemeData(
+    color: const Color(0xFF16141C),
+    elevation: 4,
+    shape: RoundedRectangleBorder(
+      borderRadius: BorderRadius.circular(16),
+    ),
+  ),
+  inputDecorationTheme: InputDecorationTheme(
+    filled: true,
+    fillColor: const Color(0xFF1B1922),
+    border: OutlineInputBorder(
+      borderRadius: BorderRadius.circular(12),
+      borderSide: const BorderSide(color: Color(0xFF2A2731)),
+    ),
+  ),
+);
+
+/// ---------------------- SCREENS ----------------------
+
+class HomeScreen extends StatefulWidget {
+  final MoodStore store;
+  final VoidCallback onShare;
+  const HomeScreen({super.key, required this.store, required this.onShare});
 
   @override
-  State<MoodPage> createState() => _MoodPageState();
+  State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _MoodPageState extends State<MoodPage> {
-  final TextEditingController _moodController = TextEditingController();
-  final TextEditingController _noteController = TextEditingController();
+class _HomeScreenState extends State<HomeScreen> {
+  int _tab = 0;
 
-  String? savedMood;
-  String? savedNote;
+  @override
+  Widget build(BuildContext context) {
+    final tabs = [
+      _LogMoodTab(store: widget.store),
+      _HistoryTab(store: widget.store),
+      _SettingsTab(store: widget.store),
+    ];
 
-  void _saveMood() {
-    setState(() {
-      savedMood = _moodController.text;
-      savedNote = _noteController.text;
-    });
-    _moodController.clear();
-    _noteController.clear();
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Goth Mood Tracker'),
+        centerTitle: false,
+        actions: [
+          IconButton(
+            tooltip: 'Share screenshot',
+            onPressed: widget.onShare,
+            icon: const Icon(Icons.ios_share),
+          ),
+        ],
+      ),
+      body: tabs[_tab],
+      bottomNavigationBar: NavigationBar(
+        selectedIndex: _tab,
+        onDestinationSelected: (i) => setState(() => _tab = i),
+        destinations: const [
+          NavigationDestination(icon: Icon(Icons.bloodtype), label: 'Log'),
+          NavigationDestination(icon: Icon(Icons.history), label: 'History'),
+          NavigationDestination(icon: Icon(Icons.settings), label: 'Settings'),
+        ],
+      ),
+    );
+  }
+}
+
+class _LogMoodTab extends StatefulWidget {
+  final MoodStore store;
+  const _LogMoodTab({required this.store});
+
+  @override
+  State<_LogMoodTab> createState() => _LogMoodTabState();
+}
+
+class _LogMoodTabState extends State<_LogMoodTab> {
+  final noteCtrl = TextEditingController();
+
+  @override
+  void dispose() {
+    noteCtrl.dispose();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Goth Mood Tracker'),
-      ),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Column(
-          children: [
-            TextField(
-              controller: _moodController,
-              decoration: const InputDecoration(labelText: 'Mood'),
-            ),
-            TextField(
-              controller: _noteController,
-              decoration: const InputDecoration(labelText: 'Note'),
-            ),
-            const SizedBox(height: 16),
-            ElevatedButton(
-              onPressed: _saveMood,
-              child: const Text('Save'),
-            ),
-            const SizedBox(height: 16),
-            if (savedMood != null && savedNote != null)
-              Shareable(
-                child: Card(
-                  child: ListTile(
-                    title: Text('Mood: $savedMood'),
-                    subtitle: Text('Note: $savedNote'),
-                  ),
+    final moods = GothMood.values;
+
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: ListView(
+        children: [
+          const SizedBox(height: 8),
+          Text(
+            'How bleak are we today?',
+            style: Theme.of(context).textTheme.headlineMedium,
+          ),
+          const SizedBox(height: 16),
+          Wrap(
+            spacing: 12,
+            runSpacing: 12,
+            children: [
+              for (final m in moods)
+                _MoodButton(
+                  mood: m,
+                  onTap: () async {
+                    final note = noteCtrl.text.trim();
+                    await widget.store.add(m, note: note.isEmpty ? null : note);
+                    if (mounted) {
+                      _snarkToast(context, m);
+                      noteCtrl.clear();
+                    }
+                  },
                 ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          TextField(
+            controller: noteCtrl,
+            maxLines: 2,
+            textInputAction: TextInputAction.done,
+            decoration: const InputDecoration(
+              hintText:
+                  'Optional note (e.g., “rain sounded like applause for my mistakes”)',
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _snarkToast(BuildContext context, GothMood mood) {
+    final lines = [
+      'Another day, another beautiful abyss.',
+      'Misery loves company. You brought snacks.',
+      'Congrats — you logged feelings *again*. Punk.',
+      'The void is proud of you. In its own way.',
+      'Vitamin D called. You sent it to voicemail.',
+    ];
+    final msg =
+        '${mood.emoji} ${mood.label} — ${lines[DateTime.now().second % lines.length]}';
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(msg), behavior: SnackBarBehavior.floating),
+    );
+  }
+}
+
+class _HistoryTab extends StatelessWidget {
+  final MoodStore store;
+  const _HistoryTab({required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    final items = store.entries;
+
+    if (items.isEmpty) {
+      return const Center(
+        child: Text('No entries yet. Go feel something bleak.'),
+      );
+    }
+
+    return ListView.separated(
+      padding: const EdgeInsets.all(12),
+      itemCount: items.length,
+      separatorBuilder: (_, __) => const SizedBox(height: 8),
+      itemBuilder: (_, i) {
+        final e = items[i];
+        return Card(
+          child: ListTile(
+            leading: Text(e.mood.emoji, style: const TextStyle(fontSize: 24)),
+            title: Text(e.mood.label),
+            subtitle: Text(
+              _niceDate(e.at) + (e.note == null ? '' : '\n${e.note}'),
+              maxLines: 4,
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _niceDate(DateTime dt) {
+    final d = dt.toLocal();
+    String two(int n) => n.toString().padLeft(2, '0');
+    return '${d.year}-${two(d.month)}-${two(d.day)} ${two(d.hour)}:${two(d.minute)}';
+  }
+}
+
+class _SettingsTab extends StatelessWidget {
+  final MoodStore store;
+  const _SettingsTab({required this.store});
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('Settings',
+              style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 12),
+          const Text('Theme is locked to “eternal darkness.” Obviously.'),
+          const SizedBox(height: 24),
+          FilledButton.tonal(
+            onPressed: () async {
+              final ok = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  title: const Text('Delete All Entries?'),
+                  content: const Text(
+                      'The void will reclaim your history. This cannot be undone.'),
+                  actions: [
+                    TextButton(
+                        onPressed: () => Navigator.pop(ctx, false),
+                        child: const Text('Cancel')),
+                    FilledButton(
+                        onPressed: () => Navigator.pop(ctx, true),
+                        child: const Text('Erase')),
+                  ],
+                ),
+              );
+              if (ok == true) {
+                await store.clearAll();
+                if (context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text('Emptied into the abyss.')),
+                  );
+                }
+              }
+            },
+            child: const Text('Erase All Data'),
+          ),
+          const SizedBox(height: 12),
+          const Text('v0.1.0 — “First Coffin”'),
+        ],
+      ),
+    );
+  }
+}
+
+/// ---------------------- UI BITS ----------------------
+
+class _MoodButton extends StatelessWidget {
+  final GothMood mood;
+  final VoidCallback onTap;
+  const _MoodButton({required this.mood, required this.onTap});
+
+  @override
+  Widget build(BuildContext context) {
+    return InkWell(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Ink(
+        width: 170,
+        height: 80,
+        decoration: BoxDecoration(
+          color: const Color(0xFF1A1821),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF2A2731)),
+        ),
+        child: Center(
+          child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              Text(mood.emoji, style: const TextStyle(fontSize: 22)),
+              const SizedBox(height: 4),
+              Text(
+                mood.label,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 12),
               ),
-            if (savedMood != null && savedNote != null)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  IconButton(
-                    tooltip: 'Share',
-                    icon: const Icon(Icons.ios_share),
-                    onPressed: () =>
-                        shareGeneric(text: 'My Goth Mood streak 👇'),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton(
-                    tooltip: 'Share to Instagram Stories',
-                    icon: const Icon(Icons.camera_alt_outlined),
-                    onPressed: () => shareToInstagramStories(
-                      attributionUrl: 'https://pixelpanic.shop',
-                    ),
-                  ),
-                ],
-              ),
-          ],
+            ],
+          ),
         ),
       ),
     );
