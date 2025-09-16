@@ -2,13 +2,16 @@ import 'dart:convert';
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
+import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart'; // for RenderRepaintBoundary
+import 'package:google_mobile_ads/google_mobile_ads.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:share_plus/share_plus.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  await MobileAds.instance.initialize();
   runApp(const GothApp());
 }
 
@@ -105,6 +108,9 @@ class MoodStore extends ChangeNotifier {
   Future<void> add(GothMood mood, {String? note}) async {
     _entries.add(MoodEntry(mood: mood, at: DateTime.now(), note: note));
     await _persist();
+    final prefs = await SharedPreferences.getInstance();
+    final n = prefs.getInt('ad_log_count') ?? 0;
+    await prefs.setInt('ad_log_count', n + 1);
     notifyListeners();
   }
 
@@ -187,6 +193,57 @@ class MoodStore extends ChangeNotifier {
   }
 }
 
+class AdIds {
+  static String get banner => kReleaseMode
+      ? 'ca-app-pub-0932354922534500/5338517500'
+      : 'ca-app-pub-3940256099942544/6300978111';
+
+  static String get interstitial => kReleaseMode
+      ? 'ca-app-pub-0932354922534500/8734018797'
+      : 'ca-app-pub-3940256099942544/1033173712';
+}
+
+class AdService {
+  InterstitialAd? _interstitial;
+
+  void loadInterstitial() {
+    InterstitialAd.load(
+      adUnitId: AdIds.interstitial,
+      request: const AdRequest(),
+      adLoadCallback: InterstitialAdLoadCallback(
+        onAdLoaded: (ad) => _interstitial = ad,
+        onAdFailedToLoad: (err) => _interstitial = null,
+      ),
+    );
+  }
+
+  void showInterstitialIfReady(VoidCallback onDismissed) {
+    final ad = _interstitial;
+    if (ad == null) return;
+    ad.fullScreenContentCallback = FullScreenContentCallback(
+      onAdDismissedFullScreenContent: (ad) {
+        ad.dispose();
+        _interstitial = null;
+        loadInterstitial();
+        onDismissed();
+      },
+      onAdFailedToShowFullScreenContent: (ad, err) {
+        ad.dispose();
+        _interstitial = null;
+        loadInterstitial();
+        onDismissed();
+      },
+    );
+    ad.show();
+    _interstitial = null;
+  }
+
+  void dispose() {
+    _interstitial?.dispose();
+    _interstitial = null;
+  }
+}
+
 /// ---------------------- APP ----------------------
 
 class GothApp extends StatefulWidget {
@@ -198,6 +255,7 @@ class GothApp extends StatefulWidget {
 
 class _GothAppState extends State<GothApp> {
   final store = MoodStore();
+  final adService = AdService();
 
   // key to capture the whole screen content
   final GlobalKey repaintKey = GlobalKey();
@@ -206,6 +264,13 @@ class _GothAppState extends State<GothApp> {
   void initState() {
     super.initState();
     store.load();
+    adService.loadInterstitial();
+  }
+
+  @override
+  void dispose() {
+    adService.dispose();
+    super.dispose();
   }
 
   Future<void> _shareScreenshot() async {
@@ -262,6 +327,9 @@ class _GothAppState extends State<GothApp> {
             child: HomeScreen(
               store: store,
               onShare: _shareScreenshot,
+              onMaybeShowInterstitial: () {
+                adService.showInterstitialIfReady(() {});
+              },
             ),
           ),
         );
@@ -306,7 +374,13 @@ final ThemeData _darkTheme = ThemeData(
 class HomeScreen extends StatefulWidget {
   final MoodStore store;
   final VoidCallback onShare;
-  const HomeScreen({super.key, required this.store, required this.onShare});
+  final VoidCallback? onMaybeShowInterstitial;
+  const HomeScreen({
+    super.key,
+    required this.store,
+    required this.onShare,
+    this.onMaybeShowInterstitial,
+  });
 
   @override
   State<HomeScreen> createState() => _HomeScreenState();
@@ -338,7 +412,17 @@ class _HomeScreenState extends State<HomeScreen> {
       body: tabs[_tab],
       bottomNavigationBar: NavigationBar(
         selectedIndex: _tab,
-        onDestinationSelected: (i) => setState(() => _tab = i),
+        onDestinationSelected: (i) async {
+          setState(() => _tab = i);
+          if (i == 1) {
+            final prefs = await SharedPreferences.getInstance();
+            final n = prefs.getInt('ad_log_count') ?? 0;
+            if (n >= 5) {
+              widget.onMaybeShowInterstitial?.call();
+              await prefs.setInt('ad_log_count', 0);
+            }
+          }
+        },
         destinations: const [
           NavigationDestination(icon: Icon(Icons.bloodtype), label: 'Log'),
           NavigationDestination(icon: Icon(Icons.history), label: 'History'),
@@ -429,27 +513,56 @@ class _LogMoodTabState extends State<_LogMoodTab> {
   }
 }
 
-class _HistoryTab extends StatelessWidget {
+class _HistoryTab extends StatefulWidget {
   final MoodStore store;
   const _HistoryTab({required this.store});
 
   @override
-  Widget build(BuildContext context) {
-    final items = store.entries;
-    final (curr, best) = store.computeStreaks();
+  State<_HistoryTab> createState() => _HistoryTabState();
+}
 
-    return ListView.builder(
+class _HistoryTabState extends State<_HistoryTab> {
+  BannerAd? _banner;
+
+  @override
+  void initState() {
+    super.initState();
+    _banner = BannerAd(
+      size: AdSize.banner,
+      adUnitId: AdIds.banner,
+      listener: BannerAdListener(
+        onAdFailedToLoad: (ad, err) {
+          ad.dispose();
+          if (!mounted) return;
+          setState(() => _banner = null);
+        },
+      ),
+      request: const AdRequest(),
+    )..load();
+  }
+
+  @override
+  void dispose() {
+    _banner?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final items = widget.store.entries;
+    final (curr, best) = widget.store.computeStreaks();
+
+    final list = ListView.builder(
       padding: const EdgeInsets.all(12),
       itemCount: (items.isEmpty ? 1 : items.length + 1),
       itemBuilder: (_, i) {
-        // First item: streak header card
         if (i == 0) {
           return Card(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
               child: Row(
                 children: [
-                  const Icon(Icons.whatshot), // subtle, matches theme
+                  const Icon(Icons.whatshot),
                   const SizedBox(width: 10),
                   Text(
                     'Streak: $curr day${curr == 1 ? '' : 's'} • Best: $best',
@@ -461,7 +574,6 @@ class _HistoryTab extends StatelessWidget {
           );
         }
 
-        // No entries? show the empty message after the streak card
         if (items.isEmpty) {
           return const Padding(
             padding: EdgeInsets.only(top: 8),
@@ -484,6 +596,19 @@ class _HistoryTab extends StatelessWidget {
           ),
         );
       },
+    );
+
+    return Column(
+      children: [
+        Expanded(child: list),
+        if (_banner != null)
+          Container(
+            alignment: Alignment.center,
+            width: _banner!.size.width.toDouble(),
+            height: _banner!.size.height.toDouble(),
+            child: AdWidget(ad: _banner!),
+          ),
+      ],
     );
   }
 
